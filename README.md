@@ -80,8 +80,14 @@ Some clients allow passing the template in the request header. Check your client
 The interceptor must run on a different port than llama-server:
 
 ```bash
-# Default: port 8189, forwarding to localhost:8188
+# Default: port 8189, forwarding to localhost:8188 (prompt trigger mode)
 python interceptor.py
+
+# Alias trigger mode (detect from model name)
+python interceptor.py --trigger alias --verbose
+
+# Any trigger mode (alias or prompt, prompt wins)
+python interceptor.py --trigger any --verbose
 
 # Custom interceptor port
 python interceptor.py --port 9000
@@ -99,6 +105,8 @@ python interceptor.py --verbose
 **Output:**
 ```
 Interceptor/Bridge active on port 8189 -> http://localhost:8188
+Trigger mode: prompt
+  Detecting modes from system prompt tags
 ```
 
 ### Step 3: Configure Your Client
@@ -172,16 +180,140 @@ response = client.chat.completions.create(
 
 ---
 
+## Trigger Modes
+
+The interceptor supports three trigger modes for detecting which reasoning mode to use. Set the mode with the `--trigger` argument:
+
+```bash
+python interceptor.py --trigger alias    # Detect from model name
+python interceptor.py --trigger prompt   # Detect from system prompt (default)
+python interceptor.py --trigger any      # Both: alias first, prompt overrides
+```
+
+### Mode: `prompt` (Default)
+
+Detects mode from tags in the system prompt. This is the **default behavior** and matches the original implementation.
+
+```python
+response = client.chat.completions.create(
+    model="qwen3.5",
+    messages=[
+        {"role": "system", "content": "/no_thinking You are helpful"},
+        {"role": "user", "content": "Hello!"}
+    ]
+)
+```
+
+### Mode: `alias`
+
+Detects mode from the **model name**. Perfect for clients like Aider that don't allow custom system prompt modifications.
+
+**Supported Patterns:**
+
+| Pattern in Model Name | Injected Command | Mode |
+|----------------------|------------------|------|
+| `nonthinking`, `no_thinking`, `non-thinking`, `fast`, `instruct` | `/no_thinking` | Non-Thinking |
+| `precise`, `coder`, `code`, `webdev` | `/precise` | Precise |
+| `thinking`, `reasoning`, `think` | `/thinking` | Explicit Thinking |
+
+**Example:**
+
+Start the interceptor:
+```bash
+python interceptor.py --trigger alias --verbose
+```
+
+Client request:
+```python
+response = client.chat.completions.create(
+    model="openai/Qwen3.5-NonThinking",  # Contains "NonThinking"
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "What is 2+2?"}
+    ]
+)
+```
+
+The interceptor will:
+1. Detect "NonThinking" in the model name
+2. Inject `/no_thinking` into the system prompt
+3. Apply non-thinking sampling parameters
+
+### Mode: `any`
+
+Checks **both** alias and prompt. Explicit tags in the system prompt take priority over model name detection.
+
+**Priority Order:**
+1. Check model name for alias patterns
+2. Check system prompt for explicit tags
+3. If both found: **prompt tags win** (override alias)
+
+**Example:**
+
+```python
+# Case 1: Alias only - triggers non-thinking
+response = client.chat.completions.create(
+    model="qwen-nonthinking",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+
+# Case 2: Both alias and prompt - prompt wins!
+response = client.chat.completions.create(
+    model="qwen-nonthinking",  # Would trigger non-thinking
+    messages=[
+        {"role": "system", "content": "/precise You are a coder"},  # But this wins!
+        {"role": "user", "content": "Write Python"}
+    ]
+)
+```
+
+### Aider Integration Example
+
+Aider doesn't allow injecting custom tags into system prompts, so use `--trigger alias`:
+
+**1. Create Aider model config** (`.aider.model.settings.yml`):
+```yaml
+- name: openai/Qwen3.5-Thinking
+  edit_format: diff
+  aliases:
+    - qwen-think
+
+- name: openai/Qwen3.5-NonThinking
+  edit_format: diff
+  aliases:
+    - qwen-fast
+```
+
+**2. Start interceptor with alias mode:**
+```bash
+python interceptor.py --trigger alias --verbose
+```
+
+**3. Launch Aider:**
+```bash
+# For thinking mode
+export OPENAI_API_KEY="someapitest"
+export OPENAI_API_BASE="http://localhost:8189/v1"
+aider --model qwen-think
+
+# For non-thinking mode (fast)
+aider --model qwen-fast
+```
+
+---
+
 ## How It Works
 
 ### Interceptor Logic Flow
 
 1. **Receive Request**: Client sends to `localhost:8189/v1/chat/completions`
-2. **Parse System Prompt**: Extract `messages[0].content` if role is "system"
-3. **Detect Tags**: Check for `/no_thinking` or `/precise`
-4. **Inject Parameters**: Override sampling params based on detected mode
-5. **Forward**: Send modified request to llama-server on port 8188
-6. **Return Response**: Stream result back to client unchanged
+2. **Detect Mode** (based on `--trigger` setting):
+   - `prompt`: Check system prompt for `/no_thinking`, `/precise` tags
+   - `alias`: Check model name for patterns (e.g., "NonThinking"), inject command into system prompt
+   - `any`: Check both; prompt tags override alias detection
+3. **Inject Parameters**: Override sampling params based on detected mode
+4. **Forward**: Send modified request to llama-server on port 8188
+5. **Return Response**: Stream result back to client unchanged
 
 ### Jinja Template Logic
 
@@ -325,7 +457,22 @@ elif "/creative" in system_content:
 ### Interceptor not detecting modes
 - Ensure the tag is in the **first** system message
 - Check that `/no_thinking` is lowercase and includes the underscore
-- Run with `--verbose` to see detected mode in console
+- Run with `--verbose` to see detected mode and source in console
+- Verify your `--trigger` mode matches your usage:
+  - Use `--trigger alias` if detecting from model names
+  - Use `--trigger prompt` (default) if using system prompt tags
+  - Use `--trigger any` for maximum flexibility
+
+### Alias mode not working
+- Ensure `--trigger alias` or `--trigger any` is set
+- Check model name contains a recognized pattern (e.g., "NonThinking", "fast", "precise")
+- Use `--verbose` to see if the alias is detected and command injected
+- Case-insensitive matching is used, so "NONTHINKING" and "nonthinking" both work
+
+### Prompt tags override not working in `any` mode
+- Ensure the explicit tag is at the **start** of the system prompt
+- Only `/no_thinking`, `/precise`, and `/thinking` are recognized as override tags
+- Use `--verbose` to see which source was used (should show "prompt" as source)
 
 ### Thinking tokens still appear with `/no_thinking`
 - Verify llama-server is using the Jinja template

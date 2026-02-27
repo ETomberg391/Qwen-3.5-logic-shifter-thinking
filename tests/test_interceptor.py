@@ -11,10 +11,11 @@ def create_client(base_url="http://localhost:8189/v1"):
     return OpenAI(base_url=base_url, api_key="not-needed")
 
 
-def test_mode(client, mode_name, system_tag, user_query):
+def test_mode(client, mode_name, system_tag, user_query, model_name="qwen3.5"):
     """Test a specific mode and print results."""
     print(f"\n{'='*60}")
     print(f"Testing: {mode_name}")
+    print(f"Model: {model_name}")
     if system_tag:
         print(f"System Tag: {system_tag}")
     print("-"*60)
@@ -38,7 +39,7 @@ def test_mode(client, mode_name, system_tag, user_query):
 
     try:
         response = client.chat.completions.create(
-            model="qwen3.5",
+            model=model_name,
             messages=messages,
             stream=False  # Non-streaming for cleaner test output
         )
@@ -55,10 +56,11 @@ def test_mode(client, mode_name, system_tag, user_query):
         print(f"Error: {e}")
 
 
-def test_streaming_mode(client, mode_name, system_tag, user_query):
+def test_streaming_mode(client, mode_name, system_tag, user_query, model_name="qwen3.5"):
     """Test a specific mode with streaming output."""
     print(f"\n{'='*60}")
     print(f"Testing Streaming: {mode_name}")
+    print(f"Model: {model_name}")
     if system_tag:
         print(f"System Tag: {system_tag}")
     print("-"*60)
@@ -70,7 +72,7 @@ def test_streaming_mode(client, mode_name, system_tag, user_query):
 
     try:
         response = client.chat.completions.create(
-            model="qwen3.5",
+            model=model_name,
             messages=messages,
             stream=True  # Streaming enabled for this test
         )
@@ -99,6 +101,38 @@ def test_precise_mode(client):
     )
 
 
+def test_alias_mode(client, alias_model="qwen3.5-nonthinking"):
+    """Test alias mode detection from model name."""
+    print(f"\n{'='*60}")
+    print(f"Testing Alias Mode Detection")
+    print(f"Model Name: {alias_model} (should trigger /no_thinking)")
+    print(f"{'='*60}")
+    
+    test_mode(
+        client=client,
+        mode_name="Alias Mode (Non-Thinking via Model Name)",
+        system_tag=None,  # No explicit tag
+        user_query="What is the capital of France?",
+        model_name=alias_model
+    )
+
+
+def test_alias_override(client):
+    """Test that prompt tags override alias detection."""
+    print(f"\n{'='*60}")
+    print(f"Testing Alias Override (Prompt should win)")
+    print(f"Model: qwen3.5-nonthinking with /precise tag")
+    print(f"{'='*60}")
+    
+    test_mode(
+        client=client,
+        mode_name="Alias Override Test (Prompt wins)",
+        system_tag="/precise",  # Explicit precise tag
+        user_query="Write a Python function to reverse a string.",
+        model_name="qwen3.5-nonthinking"  # Would trigger non-thinking, but prompt wins
+    )
+
+
 def run_all_tests():
     """Run all test scenarios."""
     
@@ -106,6 +140,9 @@ def run_all_tests():
     parser = argparse.ArgumentParser(description="Test the Qwen 3.5 Logic Shifter Interceptor")
     parser.add_argument("--base-url", default="http://localhost:8189/v1", help="Interceptor base URL (default: http://localhost:8189/v1)")
     parser.add_argument("--streaming", action="store_true", help="Run streaming tests instead of non-streaming")
+    parser.add_argument("--alias-model", default="qwen3.5-nonthinking", help="Model name for alias mode tests (default: qwen3.5-nonthinking)")
+    parser.add_argument("--test-trigger", type=str, choices=["alias", "prompt", "any", "all"], 
+                        help="Test specific trigger mode behavior")
     args = parser.parse_args()
 
     print("="*60)
@@ -124,11 +161,48 @@ def run_all_tests():
         print(f"  Error: {e}")
         print("\nMake sure to start the interceptor first:")
         print("  python interceptor.py --verbose")
+        print("\nOr with specific trigger mode:")
+        print("  python interceptor.py --trigger alias --verbose")
+        print("  python interceptor.py --trigger any --verbose")
 
     # Create client with custom base URL if provided
     client = create_client(args.base_url)
 
-    if args.streaming:
+    # Run specific trigger mode tests if requested
+    if args.test_trigger:
+        print(f"\n{'='*60}")
+        print(f"Running tests for --trigger {args.test_trigger} mode")
+        print(f"{'='*60}")
+        
+        if args.test_trigger == "alias":
+            # Test alias detection
+            test_alias_mode(client, args.alias_model)
+            
+        elif args.test_trigger == "prompt":
+            # Test prompt detection
+            test_mode(
+                client=client,
+                mode_name="Prompt Mode - Non-Thinking",
+                system_tag="/no_thinking",
+                user_query="What is 2+2?"
+            )
+            test_precise_mode(client)
+            
+        elif args.test_trigger in ("any", "all"):
+            # Test any mode: alias detection
+            test_alias_mode(client, args.alias_model)
+            # Test any mode: prompt override
+            test_alias_override(client)
+            # Test any mode: prompt only
+            test_mode(
+                client=client,
+                mode_name="Prompt Mode - Non-Thinking",
+                system_tag="/no_thinking",
+                user_query="What is 2+2?",
+                model_name="qwen3.5"
+            )
+    
+    elif args.streaming:
         # Run streaming tests
         test_streaming_mode(
             client=client, 
@@ -145,7 +219,7 @@ def run_all_tests():
         )
 
     else:
-        # Run non-streaming tests
+        # Run non-streaming tests (original test suite)
         
         # Test 1: General Thinking Mode (Default)
         test_mode(
