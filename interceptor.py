@@ -257,7 +257,49 @@ def get_mode_and_params(data, trigger_mode):
 # ============================================================================
 
 def get_args():
-    parser = argparse.ArgumentParser(description="Llama-Server Proxy Interceptor with Trigger Modes")
+    # Build epilog with model aliases and mode parameters
+    epilog = """
+MODEL ALIAS MAPPINGS (--trigger alias or any):
+  Pattern in Model Name      -> Injected Command
+  ---------------------      ------------------
+  nonthinking, no_thinking   -> /no_thinking
+  non-thinking, not-thinking -> /no_thinking
+  fast, instruct             -> /no_thinking
+  precise, coder, code       -> /precise
+  webdev                     -> /precise
+  thinking, reasoning, think -> /thinking
+
+MODE PARAMETERS:
+  Command        Mode Name                      Temp   TopP   Presence
+  -------        ---------                      ----   ----   --------
+  /no_thinking   MODE: NON-THINKING / INSTRUCT  0.7    0.8    1.5
+  /precise       MODE: THINKING (Precise)       0.6    0.95   0.0
+  /thinking      MODE: THINKING (General)       1.0    0.95   1.5
+  (default)      MODE: THINKING (General)       1.0    0.95   1.5
+
+TRIGGER MODES:
+  alias  - Detect mode from model name patterns only
+  prompt - Detect mode from system prompt tags only (default)
+  any    - Check both; explicit prompt tags override alias detection
+
+EXAMPLES:
+  # Default prompt mode
+  python interceptor.py --verbose
+
+  # Alias mode (detect from model name)
+  python interceptor.py --trigger alias --verbose
+
+  # Any mode with custom ports
+  python interceptor.py --trigger any --port 9000 --llm-port 8080 --verbose
+
+For more information: https://github.com/yourusername/qwen-3.5-logic-shifter
+"""
+
+    parser = argparse.ArgumentParser(
+        description="Llama-Server Proxy Interceptor with Trigger Modes",
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--verbose", action="store_true", help="Print detailed request and mode info")
     parser.add_argument("--port", type=int, default=8189, help="Proxy port (default: 8189)")
     parser.add_argument("--llm-port", type=int, default=8188, help="llama-server port (default: 8188)")
