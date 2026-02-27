@@ -327,3 +327,4 @@ This project is provided as-is for educational and development purposes.
 - Built for [Qwen 3.5](https://huggingface.co/Qwen) by Alibaba Cloud
 - Uses [llama.cpp](https://github.com/ggerganov/llama.cpp) for inference
 - Jinja template based on Qwen's official chat format
+- Jinja template's modifications from Bartowski and -Ellary- for the main logic shifting.
