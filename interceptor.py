@@ -25,20 +25,44 @@ def intercepted_chat():
     messages = data.get("messages", [])
     system_content = next((msg.get("content", "") for msg in messages if msg.get("role") == "system"), "")
 
-    mode_name = "MODE: THINKING (General)"
-    params = {"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5, "frequency_penalty": 1.0}
+    # Default: Thinking Mode (General)
+    params = {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 1.5,
+        "repeat_penalty": 1.0
+    }
 
     if "/no_thinking" in system_content:
-        mode_name = "MODE: NON-THINKING / INSTRUCT (Fast)"
-        params.update({"temperature": 0.7, "top_p": 0.8, "presence_penalty": 1.5})
+        mode_name = "MODE: NON-THINKING / INSTRUCT"
+        params.update({
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 1.5,
+            "repeat_penalty": 1.0
+        })
     elif "/precise" in system_content:
         mode_name = "MODE: THINKING (Precise WebDev)"
-        params.update({"temperature": 0.6, "top_p": 0.95, "presence_penalty": 0.0})
+        params.update({
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 0.0,
+            "repeat_penalty": 1.0
+        })
+    else:
+        mode_name = "MODE: THINKING (General)"
 
     data.update(params)
 
     if args.verbose:
-        print(f"\n>>> INTERCEPTED: {mode_name} | Samplings: {list(params.values())}")
+        print(f"\n>>> INTERCEPTED: {mode_name}")
+        print(f">>> Parameters applied: {json.dumps(params, indent=2)}")
 
     headers = {k: v for k, v in request.headers if k.lower() != 'host'}
     resp = requests.post(f"{LLAMA_SERVER_URL}/v1/chat/completions", json=data, headers=headers, stream=True)

@@ -12,11 +12,13 @@ This project provides a **Flask-based interceptor** that sits between your OpenA
 
 ### Available Modes
 
-| Mode | Tag | Temperature | Top P | Best For |
-|------|-----|-------------|-------|----------|
-| **General Thinking** | *(default)* | 1.0 | 0.95 | Creative tasks, exploration |
-| **Non-Thinking** | `/no_thinking` | 0.7 | 0.8 | Fast responses, simple Q&A |
-| **Precise** | `/precise` | 0.6 | 0.95 | Code generation, web development |
+| Mode | Tag | Temperature | Top P | Top K | Min P | Presence | Repeat | Best For |
+|------|-----|-------------|-------|-------|-------|----------|--------|----------|
+| **General Thinking** | *(default)* | 1.0 | 0.95 | 20 | 0.0 | 1.5 | 1.0 | Creative tasks, exploration |
+| **Non-Thinking** | `/no_thinking` | 0.7 | 0.8 | 20 | 0.0 | 1.5 | 1.0 | Fast responses, simple Q&A |
+| **Precise** | `/precise` | 0.6 | 0.95 | 20 | 0.0 | 0.0 | 1.0 | Code generation, web development |
+
+> **Note**: These parameters are optimized for llama.cpp's sampling pipeline. `repeat_penalty` is the native llama.cpp key (not OpenAI's `frequency_penalty`).
 
 ---
 
@@ -188,7 +190,7 @@ System Prompt: "/no_thinking Be direct"
        ↓
 Interceptor detects "/no_thinking"
        ↓
-Sets sampling: temp=0.7, top_p=0.8
+Sets sampling: temp=0.7, top_p=0.8, top_k=20, min_p=0.0, presence=1.5, repeat=1.0
        ↓
 Jinja template:
    - Strips "/no_thinking" from output
@@ -247,17 +249,37 @@ Model sees: "Be direct" → responds immediately (empty think block)
 
 ### Custom Sampling Parameters
 
-Edit [`interceptor.py`](interceptor.py:27-34) to adjust the default parameters:
+Edit [`interceptor.py`](interceptor.py:28-57) to adjust the default parameters:
 
 ```python
-# Default /no_thinking params
+# Default parameters for General Thinking mode
+params = {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 1.5,
+    "repeat_penalty": 1.0  # llama.cpp native key (not frequency_penalty)
+}
+
+# Override for /no_thinking mode
 params.update({
     "temperature": 0.7,
     "top_p": 0.8,
-    "presence_penalty": 1.5
-    # Add: "frequency_penalty": 1.0, "top_k": 40, etc.
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 1.5,
+    "repeat_penalty": 1.0
 })
 ```
+
+**Parameter Reference:**
+- `temperature`: Randomness (0.0-2.0, higher = more creative)
+- `top_p`: Nucleus sampling threshold (0.0-1.0)
+- `top_k`: Limit vocabulary to top K tokens (1-100)
+- `min_p`: Dynamic minimum probability filter (0.0-1.0)
+- `presence_penalty`: Penalize token reuse across the entire prompt (0.0-2.0)
+- `repeat_penalty`: Multiplier for repeated tokens (1.0 = no penalty, >1.0 = penalize)
 
 ### Custom Mode Tags
 
@@ -270,14 +292,28 @@ elif "/creative" in system_content:
     params.update({"temperature": 1.2, "top_p": 0.99})
 ```
 
-2. **In [`qwen3-5-logic-shifting.jinja`](qwen3-5-logic-shifting.jinja:50-52):**
+2. **In [`interceptor.py`](interceptor.py):**
+```python
+elif "/creative" in system_content:
+    mode_name = "MODE: CREATIVE"
+    params.update({
+        "temperature": 1.2,
+        "top_p": 0.99,
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 0.0,
+        "repeat_penalty": 1.0
+    })
+```
+
+3. **In [`qwen3-5-logic-shifting.jinja`](chat-template/qwen3-5-logic-shifting.jinja:50-52):**
 ```jinja
 {%- if '/creative' in sys_text_check %}
     {%- set ns_flags.disable_thinking = false %}
 {%- endif %}
 ```
 
-3. **Strip tag in lines 73 and 81:**
+4. **Strip tag in lines 73 and 81:**
 ```jinja
 |replace('/no_thinking','')|replace('/creative','')
 ```
